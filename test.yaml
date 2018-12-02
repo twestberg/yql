@@ -1,0 +1,25 @@
+# Kubernetes Cluster: xxx
+# Description:
+#   Values file for 
+---
+namespace: twestberg # k8s namespace you're going to be deploying to
+releaseName: twestberg-sandbox
+
+# Containers
+imageRegistry: 222222222.dkr.ecr.us-east-1.amazonaws.com/tddium_site
+releaseTags:
+  Default: ciagents-602-rebased-latest # Docker tag used if the below aren't specified
+  Blobmgr: latest
+pullPolicy: Always
+
+
+broker:
+  replicas: 1
+  addresses:
+    - this one
+    - that one
+    - the other one
+
+blobmgr:
+  replicas: 1
+  configPath: "/home/api/bin/config-sandbox.yml"
