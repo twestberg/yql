@@ -3,7 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	//"github.com/go-yaml/yaml"
+	"github.com/go-yaml/yaml"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,6 +29,8 @@ type argStruct struct {
 	progname string
 }
 
+type datamap map[interface{}]interface{}
+
 var args argStruct
 
 func main() {
@@ -37,9 +40,122 @@ func main() {
 		usage(err)
 		return
 	}
-	fmt.Printf("%#v\n", args)
+	// Attempt to read the data file
+	b, err := ioutil.ReadFile(args.filepath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to read data file %s : %v\n", args.filepath, err)
+		return
+	}
+	var data datamap = make(datamap)
+	err = yaml.Unmarshal(b, &data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to parse data file %s : %v\n", args.filepath, err)
+		return
+	}
+	if args.cmd == "get" {
+		get(data, args.keypath)
+	} else if args.cmd == "set" {
+		data, err = set(data, args.keypath, args.val)
+		if err == nil {
+			// write the datamap back out to the file TODO
+			fmt.Printf("%v\n", data)
+		} else {
+			errprint("%v\n", err)
+		}
+	}
+	// fmt.Printf("%#v\n", args)
 }
 
+// Get the value at the keypath in the data
+func get(data datamap, path []keyElement) {
+	var val interface{} = data
+	pathname := "root"
+	for _, elt := range path {
+		if elt.isMap {
+			m, ok := val.(datamap)
+			if !ok {
+				errprint("%s is not a map.\n", pathname)
+				return
+			}
+			val, ok = m[elt.key]
+			if !ok {
+				errprint("%s.%s not found\n", pathname, elt.key)
+			}
+			pathname = elt.key
+		} else {
+			m, ok := val.([]interface{})
+			if !ok {
+				errprint("%s is not an array.\n", pathname)
+				return
+			}
+			if elt.index >= len(m) {
+				errprint("%s[%d] index out of bounds\n", pathname, elt.index)
+				return
+			}
+			val = m[elt.index]
+		}
+	}
+	fmt.Printf("%v\n", val)
+}
+
+// Set the given value v at the keypath in the data
+func set(data datamap, path []keyElement, v string) (err error) {
+	var val interface{} = data
+	pathname := "root"
+	for idx, elt := range path {
+		if elt.isMap {
+			m, ok := val.(datamap)
+			if !ok {
+				return fmt.Errorf("%s is not a map.\n", pathname)
+			}
+			val, ok = m[elt.key]
+			if !ok {
+				// Need to create a new thing at this key. It can be only a new map
+				// or a place for a value
+				if idx >= len(path)-1 {
+					// last item
+					m[elt.key] = new(interface{})
+					val = m[elt.key]
+				} else {
+					nextElt := path[idx+1]
+					if nextElt.isMap {
+						m[elt.key] = new(datamap)
+						val = m[elt.key]
+					} else {
+						return fmt.Errorf("Cannot create an array at %s\n", elt.key)
+					}
+				}
+			}
+			pathname = elt.key
+		} else {
+			m, ok := val.([]interface{})
+			if !ok {
+				return fmt.Errorf("%s is not an array.\n", pathname)
+			}
+			if elt.index >= len(m) {
+				return fmt.Errorf("Index (%d) out of range. Cannot grow arrays", elt.index)
+			}
+			val = m[elt.index]
+		}
+	}
+	// Afer crawling the path, set the val
+	fmt.Printf("%s is currently %v\n", pathname, val)
+	i, e := strconv.Atoi(v)
+	if e == nil {
+		val = i
+	} else {
+		val = v
+	}
+	fmt.Printf("%s is now %v\n", pathname, val)
+	rdata = data
+	return rdata, nil
+}
+
+func errprint(f string, aargs ...interface{}) {
+	if !args.quiet {
+		fmt.Fprintf(os.Stderr, f, aargs...)
+	}
+}
 func parseCmd() (args argStruct, err error) {
 	var quiet = flag.Bool("q", false, "quiet warnings")
 	var filePath = flag.String("f", "", "set db filepath (or use YQL_FILE env variable)")
@@ -124,14 +240,14 @@ func nextElement(s *scanner.Scanner) (elt keyElement) {
 		// Beginning of an index
 		tok = s.Scan()
 		if tok != scanner.Int {
-			fmt.Fprintf(os.Stderr, "expected int after [ in keypath\n")
+			errprint("expected int after [ in keypath\n")
 			return // not valid
 		} else {
 			elt.index, _ = strconv.Atoi(s.TokenText())
 			// Finally, require a closing bracket
 			tok = s.Scan()
 			if tok != ']' {
-				fmt.Fprintf(os.Stderr, "expected ] after index in keypath\n")
+				errprint("expected ] after index in keypath\n")
 				return
 			} else {
 				elt.valid = true
